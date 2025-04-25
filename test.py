@@ -4,161 +4,175 @@ import zlib
 import random
 from sympy import primerange
 
-# ---------------- RSA KEY GENERATION ------------------
-def generate_prime(bits=8):
-    start = 2**(bits - 1)
-    end = 2**bits
-    primes = list(primerange(start, end))
-    return random.choice(primes)
+# Generowanie klucza RSA
 
-def gcd(a, b):
-    while b:
-        a, b = b, a % b
+# genrowanie liczb pierwszych
+# argument bity=128 oznacza ze szukamy liczb z przedziału
+# od 2^127 do 2^128
+def generuj_pierwsze(bity=8):
+    poczatek = 2**(bity - 1)
+    koniec = 2 ** bity
+    pierwsze = list(primerange(poczatek, koniec))
+    return random.choice(pierwsze)
+
+# odwrotnosc modulo sluzy do znalezienia klucza prywatnego d
+# d ma byc odwrotnoscia modulo phi liczby e
+def odw_modulo(e, phi):
+    for d in range(3, phi):
+        if (d * e) % phi == 1:
+            return d
+    raise ValueError("Odwrotnosc modulo nie istnieje")
+
+# obliczenie nwd za pomoca algorytmu euklidesa
+def nwd(a, b):
+    while b > 0:
+        pom = a
+        a = b
+        b = pom % b
     return a
 
-def egcd(a, b):
-    if a == 0:
-        return b, 0, 1
-    g, y, x = egcd(b % a, a)
-    return g, x - (b // a) * y, y
-
-def modinv(a, m):
-    g, x, _ = egcd(a, m)
-    if g != 1:
-        raise Exception('Brak odwrotności modularnej')
-    return x % m
-
-def generate_keys(bits=8):
-    p = generate_prime(bits)
-    q = generate_prime(bits)
-    while q == p:
-        q = generate_prime(bits)
+# generowanie kluczy
+def generuj_klucze(bity=8):
+    p = generuj_pierwsze(bity)
+    q = generuj_pierwsze(bity)
+    # na wypadek jakby p i q wygenerowaly sie identyczne
+    while p == q:
+        q = generuj_pierwsze(bity)
 
     n = p * q
-    phi = (p - 1) * (q - 1)
+    phi_n = (p-1) * (q-1)
 
     e = 3
-    while gcd(e, phi) != 1:
+    while nwd(e, phi_n) != 1:
+        # zwiekszamy co 2 zeby nie marnowac czasu na liczby parzyste
         e += 2
+        if e >= phi_n:
+            raise ValueError("Nie znaleziono liczby wzglednie pierwszej do phi(n)")
 
-    d = modinv(e, phi)
+    d = odw_modulo(e, phi_n)
 
-    public_key = (e, n)
-    private_key = (d, n)
-    return public_key, private_key
+    klucz_publiczny = e
+    klucz_prywatny = d
+    iloczyn_p_q = n
 
-# ---------------- RSA ENCRYPTION/DECRYPTION ------------------
-def rsa_encrypt(data: bytes, public_key):
-    e, n = public_key
-    return [pow(byte, e, n) for byte in data]
+    return klucz_publiczny, klucz_prywatny, iloczyn_p_q, phi_n, p, q
 
-def rsa_decrypt(encrypted_data, private_key):
-    d, n = private_key
-    return bytes([pow(c, d, n) for c in encrypted_data])
+def szyfrowanie_rsa(data: bytes, klucz_publiczny, iloczyn_p_q):
+    e = klucz_publiczny
+    n = iloczyn_p_q
+    # (m ^ e) mod n = c
+    return [pow(c, e, n) for c in data]
 
-# ---------------- PNG CHUNK HANDLING ------------------
+def rozszyfrowanie_rsa(zaszyfrowane_dane, klucz_prywatny, iloczyn_p_q):
+    d = klucz_prywatny
+    n = iloczyn_p_q
+    # (c ^ d) mod n =m
+    return bytes([pow(c, d, n) for c in zaszyfrowane_dane])
+
+# bity na inty z poprzedniego projektu
 def bytes_to_int(byte_data):
     result = 0
     for byte in byte_data:
         result = result * 256 + int(byte)
     return result
 
+# podzial chunkow z poprzedniego projektu
 def parse_chunks(file_bytes):
-    index = 8  # skip PNG signature
+    index = 8
     chunks = []
+
     while index < len(file_bytes):
-        chunk_len = bytes_to_int(file_bytes[index:index+4])
-        chunk_type = file_bytes[index+4:index+8].decode('utf-8')
-        data = file_bytes[index+8:index+8+chunk_len]
-        crc = file_bytes[index+8+chunk_len:index+12+chunk_len]
+        chunk_len = bytes_to_int(file_bytes[index:index + 4])
+        chunk_type = file_bytes[index + 4:index + 8].decode('utf-8')
+        data = file_bytes[index + 8:index + 8 + chunk_len]
+        crc = file_bytes[index + 8 + chunk_len:index + 12 + chunk_len]
         chunks.append((chunk_type, data, crc))
         index += 12 + chunk_len
+
     return chunks
 
-# W chunku IDAT znajduje się masa bitowa pliku
-def get_idat_data(chunks):
-    return b''.join(data for (ctype, data, _) in chunks if ctype == 'IDAT')
+# w chunku idat znajduje sie masa bitowa pliku
+# wyciagniecie danych z chunka IDAT i sklejenie ich razem
+def dane_idat(chunki):
+    return b''.join(dane for (rodzaj_chunka, dane, _) in chunki if rodzaj_chunka == 'IDAT')
 
-def replace_idat_data(chunks, new_data):
-    new_chunks = []
-    inserted = False
-    for chunk_type, data, crc in chunks:
-        if chunk_type != 'IDAT':
-            new_chunks.append((chunk_type, data, crc))
-        elif not inserted:
-            compressed = zlib.compress(new_data)
-            crc_value = zlib.crc32(b'IDAT' + compressed).to_bytes(4, 'big')
-            new_chunks.append(('IDAT', compressed, crc_value))
-            inserted = True
-    return new_chunks
+def replace_idat_data(chunki, nowe_dane):
+    nowe_chunki = []
+    wstawiono = False
+    for rodzaj, dane, crc in chunki:
+        if rodzaj != 'IDAT':
+            nowe_chunki.append((rodzaj, dane, crc))
+        elif not wstawiono:
+            skompresowane = zlib.compress(nowe_dane)
+            crc = zlib.crc32(b'IDAT' + skompresowane).to_bytes(4, 'big')
+            nowe_chunki.append(('IDAT', skompresowane, crc))
+            wstawiono = True
+    return nowe_chunki
 
-def reconstruct_png(signature, chunks):
-    png = bytearray(signature)
-    for chunk_type, data, crc in chunks:
-        png.extend(len(data).to_bytes(4, 'big'))
-        png.extend(chunk_type.encode('utf-8'))
-        png.extend(data)
+def odbuduj_png(naglowek, chunki):
+    png = bytearray(naglowek)
+    for rodzaj, dane, crc in chunki:
+        png.extend(len(dane).to_bytes(4, 'big'))
+        png.extend(rodzaj.encode('utf-8'))
+        png.extend(dane)
         png.extend(crc)
     return png
 
-# ---------------- FILE I/O ------------------
-def read_file_bytes(file_path):
-    with open(file_path, 'rb') as file:
-        return file.read()
+def wczytaj_bajty(sciezka):
+    with open(sciezka, 'rb') as f:
+        return f.read()
 
-def save_bytes(file_path, data):
-    with open(file_path, 'wb') as f:
-        f.write(data)
+def zapisz_bajty(sciezka, dane):
+    with open(sciezka, 'wb') as f:
+        f.write(dane)
 
-# ---------------- MAIN PROGRAM ------------------
-if __name__ == "__main__":
+def main():
+    klucz_publiczny, klucz_prywatny, iloczyn_p_q, phi_n, p, q = generuj_klucze(bity=8)
+
     if len(sys.argv) < 2:
-        print("Użycie: python rsa_png.py <nazwa_plik.png>")
+        print("Podaj poprawny format wywołania pliku: python script.py <ścieżka_do_pliku>")
+        return
+
+    sciezka = sys.argv[1]
+
+    if not os.path.exists(sciezka):
+        print(f"Plik '{sciezka}' nie istnieje.")
         sys.exit(1)
 
-    input_filename = sys.argv[1]
+    print(f"Klucz publiczny (e): {klucz_publiczny}")
+    print(f"Klucz prywatny (d): {klucz_prywatny}")
+    print(f"Iloczyn p * q (n): {iloczyn_p_q}")
+    print(f"phi(n): {phi_n}")
+    print(f"Liczby pierwsze p: {p}, q: {q}")
 
-    if not os.path.exists(input_filename):
-        print(f"Plik '{input_filename}' nie istnieje.")
-        sys.exit(1)
+    # wczytanie PNG w formie bajtow i podział na chunki
+    bajty = wczytaj_bajty(sciezka)
+    naglowek = bajty[:8]
+    chunki = parse_chunks(bajty)
 
-    # Wczytaj plik i rozbij na chunk'i
-    file_bytes = read_file_bytes(input_filename)
-    signature = file_bytes[:8]
-    chunks = parse_chunks(file_bytes)
+    surowe_dane = dane_idat(chunki)
+    dane_po_dekompresji = zlib.decompress(surowe_dane)
 
-    # Wygeneruj klucze RSA
-    pub, priv = generate_keys(bits=8)
+    zaszyfrowane = szyfrowanie_rsa(dane_po_dekompresji, klucz_publiczny, iloczyn_p_q)
+    odszyfrowane = rozszyfrowanie_rsa(zaszyfrowane, klucz_prywatny, iloczyn_p_q)
 
-    # Pobierz i odszyfruj dane IDAT
-    compressed_idat_data = get_idat_data(chunks)
-    decompressed_idat_data = zlib.decompress(compressed_idat_data)
+    if odszyfrowane == dane_po_dekompresji:
+        print("Dane po odszyfrowaniu są zgodne z oryginałem.")
+    else:
+        print("Błąd: dane po odszyfrowaniu nie są zgodne z oryginałem.")
 
-    # Zaszyfruj i zapisz zaszyfrowaną wersję
-    encrypted_idat = rsa_encrypt(decompressed_idat_data, pub)
-    with open("encrypted.bin", "wb") as f:
-        for val in encrypted_idat:
-            f.write(val.to_bytes(2, 'big'))
+    zaszyfrowane_bajty = bytes([c % 256 for c in zaszyfrowane])
 
-    # Odtwórz sztuczne "zaszyfrowane" dane (jako bajty)
-    encrypted_bytes = b''.join(val.to_bytes(2, 'big') for val in encrypted_idat)
+    zaszyfrowane_chunki = replace_idat_data(chunki, zaszyfrowane_bajty)
+    zaszyfrowany_png = odbuduj_png(naglowek, zaszyfrowane_chunki)
+    zapisz_bajty(f"zaszyfrowany_{os.path.basename(sciezka)}", zaszyfrowany_png)
+    print(f"Zapisano zaszyfrowany plik jako: zaszyfrowany_{os.path.basename(sciezka)}")
+
+    nowe_chunki = replace_idat_data(chunki, odszyfrowane)
+    nowy_png = odbuduj_png(naglowek, nowe_chunki)
+    zapisz_bajty(f"odszyfrowany_{os.path.basename(sciezka)}", nowy_png)
+    print(f"Zapisano odszyfrowany plik jako: odszyfrowany_{os.path.basename(sciezka)}")
 
 
-    # Podstaw nowe dane do PNG
-    encrypted_chunks = replace_idat_data(chunks, encrypted_bytes)
-    encrypted_png = reconstruct_png(signature, encrypted_chunks)
-
-    encrypted_png_path = f"encrypted_{os.path.basename(input_filename)}"
-    save_bytes(encrypted_png_path, encrypted_png)
-
-    # Odszyfruj i odtwórz oryginalne dane
-    decrypted_bytes = rsa_decrypt(encrypted_idat, priv)
-    decrypted_chunks = replace_idat_data(chunks, decrypted_bytes)
-    decrypted_png = reconstruct_png(signature, decrypted_chunks)
-
-    decrypted_png_path = f"decrypted_{os.path.basename(input_filename)}"
-    save_bytes(decrypted_png_path, decrypted_png)
-
-    print("Szyfrowanie RSA zakończone pomyślnie.")
-    print(f"Zaszyfrowany plik PNG zapisany jako: {encrypted_png_path}")
-    print(f"Odszyfrowany plik PNG zapisany jako: {decrypted_png_path}")
+if __name__ == "__main__":
+    main()
