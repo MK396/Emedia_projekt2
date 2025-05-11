@@ -2,8 +2,6 @@ import os
 import sys
 import zlib
 import random
-from random import randint
-
 from sympy import primerange
 
 # Generowanie klucza RSA
@@ -11,7 +9,7 @@ from sympy import primerange
 # genrowanie liczb pierwszych
 # argument bity=128 oznacza ze szukamy liczb z przedziału
 # od 2^127 do 2^128
-def generuj_pierwsze(bity=8):
+def generuj_pierwsze(bity=1024):
     poczatek = 2 ** (bity - 1)
     koniec = 2 ** bity
     pierwsze = list(primerange(poczatek, koniec))
@@ -34,7 +32,7 @@ def nwd(a, b):
     return a
 
 # generowanie kluczy
-def generuj_klucze(bity=8):
+def generuj_klucze(bity=1024):
     p = generuj_pierwsze(bity)
     q = generuj_pierwsze(bity)
     # na wypadek jakby p i q wygenerowaly sie identyczne
