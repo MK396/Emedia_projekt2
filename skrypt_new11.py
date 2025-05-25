@@ -170,9 +170,10 @@ def odszyfrowanie_rsa_cbc(zaszyfrowane_bloki, d, n, rozmiar_bloku, iv):
     return odszyfrowane
 
 
+
 def main():
     if len(sys.argv) < 2:
-        print("Podaj poprawny format wywołania pliku: python script.py <ścieżka_do_pliku>")
+        print("Użycie: python script.py <ścieżka_do_pliku_png>")
         return
 
     sciezka = sys.argv[1]
@@ -182,30 +183,21 @@ def main():
         sys.exit(1)
 
     bity = 1024
-
     p, q, n, phi, e, d = generuj_klucze(bity)
     print(f"p: {p}")
     print(f"q: {q}")
     print(f"n = p * q: {n}")
-    print(f"Funkcja Eulera (phi): {phi}")
+    print(f"phi: {phi}")
     print(f"e: {e}")
-    d = odw_modulo(e, phi)
     print(f"d: {d}")
 
     bajty = wczytaj_bajty(sciezka)
     chunki = parse_chunks(bajty)
     surowe_dane = dane_idat(chunki)
+    rozpakowane = zlib.decompress(surowe_dane)
 
-    zdekompresowane = zlib.decompress(surowe_dane)
-
-    # wielkość bloku w bajtach
-    # dzielimy przez 8 bo chcemy podzielic na bajty oraz przez 2 bo maksymalny rozmiar
-    # bloku musi być mniejszy od klucza
     rozmiar_bloku = bity // 16
-
-    # podział na bloki
-    bloki = [zdekompresowane[i:i + rozmiar_bloku] for i in range(0, len(zdekompresowane), rozmiar_bloku)]
-
+    bloki = [rozpakowane[i:i + rozmiar_bloku] for i in range(0, len(rozpakowane), rozmiar_bloku)]
 
     print(f"Liczba bloków: {len(bloki)}")
 
@@ -214,15 +206,15 @@ def main():
     zaszyfrowane_dane_ecb = polacz_bloki(zaszyfrowane_bloki_ecb)
     zaszyfrowane_idat_ecb = zlib.compress(zaszyfrowane_dane_ecb)
     zapisz_obraz(chunki, zaszyfrowane_idat_ecb, "zaszyfrowany_ecb.png")
-    print("Zapisano zaszyfrowany obraz RSA-ECB jako zaszyfrowany_ecb.png")
+    print("Zapisano zaszyfrowany obraz jako zaszyfrowany_ecb.png")
 
     # DESZYFROWANIE ECB
     dane_zaszyfrowane_ecb = dane_idat(parse_chunks(wczytaj_bajty("zaszyfrowany_ecb.png")))
     rozpakowane_ecb = zlib.decompress(dane_zaszyfrowane_ecb)
-    rozmiar_bloku = (n.bit_length() + 7) // 8
-    zaszyfrowane_bloki_ecb = [rozpakowane_ecb[i:i + rozmiar_bloku] for i in range(0, len(rozpakowane_ecb), rozmiar_bloku)]
+    block_size_encrypted = (n.bit_length() + 7) // 8
+    zaszyfrowane_bloki_ecb = [rozpakowane_ecb[i:i + block_size_encrypted] for i in range(0, len(rozpakowane_ecb), block_size_encrypted)]
     odszyfrowane_bloki_ecb = odszyfrowanie_rsa_ecb(zaszyfrowane_bloki_ecb, d, n, rozmiar_bloku)
-    odszyfrowane_dane_ecb = polacz_bloki(odszyfrowane_bloki_ecb)[:len(zdekompresowane)]
+    odszyfrowane_dane_ecb = polacz_bloki(odszyfrowane_bloki_ecb)[:len(rozpakowane)]
     odszyfrowane_idat_ecb = zlib.compress(odszyfrowane_dane_ecb)
     zapisz_obraz(chunki, odszyfrowane_idat_ecb, "odszyfrowany_ecb.png")
     print("Zapisano odszyfrowany obraz RSA-ECB jako odszyfrowany_ecb.png")
@@ -239,12 +231,13 @@ def main():
     rozpakowane_cbc = zlib.decompress(dane_zaszyfrowane_cbc)
     iv_odszyfrowanie = rozpakowane_cbc[:rozmiar_bloku]
     dane_bez_iv = rozpakowane_cbc[rozmiar_bloku:]
-    zaszyfrowane_bloki_cbc = [dane_bez_iv[i:i + rozmiar_bloku] for i in range(0, len(dane_bez_iv), rozmiar_bloku)]
+    zaszyfrowane_bloki_cbc = [dane_bez_iv[i:i + block_size_encrypted] for i in range(0, len(dane_bez_iv), block_size_encrypted)]
     odszyfrowane_bloki_cbc = odszyfrowanie_rsa_cbc(zaszyfrowane_bloki_cbc, d, n, rozmiar_bloku, iv_odszyfrowanie)
-    odszyfrowane_dane_cbc = polacz_bloki(odszyfrowane_bloki_cbc)[:len(zdekompresowane)]
+    odszyfrowane_dane_cbc = polacz_bloki(odszyfrowane_bloki_cbc)[:len(rozpakowane)]
     odszyfrowane_idat_cbc = zlib.compress(odszyfrowane_dane_cbc)
     zapisz_obraz(chunki, odszyfrowane_idat_cbc, "odszyfrowany_cbc.png")
     print("Zapisano odszyfrowany obraz RSA-CBC jako odszyfrowany_cbc.png")
+
 
 
 if __name__ == "__main__":
